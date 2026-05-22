@@ -21,7 +21,7 @@ class MissionConfig:
   # "orbit"
   # "follow_smooth"
   # "topdown"
-  camera_mode: str = "fixed"
+  camera_mode: str = "default"
   # Simulation timestep used by Chrono
   timestep: float = 0.005 #0.005
 
@@ -29,12 +29,15 @@ class MissionConfig:
   # "PID",
   # "MRAC",
   # "TwoLayerMRAC",
+  # "TwoLayerMRACwithRKHS",
   # "FunnelMRAC",
   # "HybridMRAC",
   # "HybridTwoLayerMRAC",
+  # "HybridMRACwithRKHS",
+  # "HybridTwoLayerMRACwithRKHS",
   # "NonAdaptiveEBCI",
   # "FunnelTwoLayerMRAC",
-  controller_type: str = "FunnelTwoLayerMRAC"
+  controller_type: str = "TwoLayerMRACwithRKHS"
 
   # User-defined trajectory types:
   # "circular_trajectory",
@@ -42,7 +45,7 @@ class MissionConfig:
   # "square_trajectory",
   # "rounded_rectangle_trajectory",
   # "piecewise_polynomial_trajectory"
-  trajectory_type: str = "piecewise_polynomial_trajectory"
+  trajectory_type: str = "circular_trajectory"
 
   # If the trajectory_type is "piecewise_polynomial_trajectory", then choose the trajectory file to run
   # Path relative to 'current_working_directory/params/user_defined_trajectory'
@@ -72,11 +75,11 @@ class MissionConfig:
   sequentially_drop_multiple_balls: bool = False
   sequentially_drop_start_time: float = 1.0 # 3.0
   sequentially_drop_interval: float = 0.10
-  
+
   # Motor Failure parameters
   apply_motor_failure: bool = False
   motor_failure_time: float = 1.0 # 4.5
-  
+
   # Apply External Forces
   # Applying Aero-Dynamic force to the drone
   apply_wind_force: bool = False
