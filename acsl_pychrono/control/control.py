@@ -63,6 +63,48 @@ class Control(ABC):
                             (mass_total_estimated * G_acc - mu_z))
     
     return u1, roll_ref, pitch_ref
+
+  @staticmethod
+  def computeU1RollPitchRefSIL(mu_x, mu_y, mu_z, mass_total_estimated, G_acc, yaw_ref, mu_raw_global=None):
+    """
+    Compute thrust and attitude references using the SIL attitude extraction.
+
+    The Python controllers store mu_z without the gravity offset, so the total
+    force vector equivalent to the C++ mu_translational is [mu_x, mu_y, mu_z - mg].
+    """
+    u1 = math.sqrt(mu_x ** 2 + mu_y ** 2 + (mass_total_estimated * G_acc - mu_z) ** 2)
+
+    if mu_raw_global is None:
+      force_global = np.array([mu_x, mu_y, mu_z - mass_total_estimated * G_acc], dtype=float)
+    else:
+      mu_raw_global = np.asarray(mu_raw_global, dtype=float).reshape(3)
+      force_global = np.array([
+        mu_raw_global[0],
+        mu_raw_global[1],
+        mu_raw_global[2] - mass_total_estimated * G_acc
+      ], dtype=float)
+
+    cy = math.cos(yaw_ref)
+    sy = math.sin(yaw_ref)
+
+    v1 = np.zeros(3)
+    v1[0] = cy * force_global[0] + sy * force_global[1]
+    v1[1] = -sy * force_global[0] + cy * force_global[1]
+    v1[2] = force_global[2]
+
+    pitch_ref = math.atan2(-v1[0], -v1[2])
+
+    cp = math.cos(pitch_ref)
+    sp = math.sin(pitch_ref)
+
+    v2 = np.zeros(3)
+    v2[0] = cp * v1[0] - sp * v1[2]
+    v2[1] = v1[1]
+    v2[2] = sp * v1[0] + cp * v1[2]
+
+    roll_ref = math.atan2(v2[1], -v2[2])
+
+    return u1, roll_ref, pitch_ref
   
   @staticmethod
   def computeTranslationalPositionError(position, desired_position):

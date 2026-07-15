@@ -1,16 +1,17 @@
 import math
 import numpy as np  
 from acsl_pychrono.control.outerloop_safetymech import OuterLoopSafetyMechanism
-from acsl_pychrono.control.MRAC.mrac_gains import MRACGains
+from acsl_pychrono.control.MRACwithRKHS.mrac_with_rkhs_gains import MRACwithRKHSGains
 from acsl_pychrono.simulation.ode_input import OdeInput
 from acsl_pychrono.simulation.flight_params import FlightParams
 from acsl_pychrono.control.control import Control
 from acsl_pychrono.control.base_mrac import BaseMRAC
 from acsl_pychrono.control.MRAC.m_mrac import M_MRAC
 from acsl_pychrono.control.projection_operator import ProjectionOperator
+from acsl_pychrono.rkhs import build_rkhs_feature_maps
 
-class MRAC(BaseMRAC, Control):
-  def __init__(self, gains: MRACGains, ode_input: OdeInput, flight_params: FlightParams, timestep: float):
+class MRACwithRKHS(BaseMRAC, Control):
+  def __init__(self, gains: MRACwithRKHSGains, ode_input: OdeInput, flight_params: FlightParams, timestep: float):
     super().__init__(odein=ode_input, gains=gains)
     self.gains = gains
     self.fp = flight_params
@@ -19,6 +20,21 @@ class MRAC(BaseMRAC, Control):
     self.dy = np.zeros((self.gains.number_of_states, 1))
     # Initial conditions
     self.y = np.zeros((self.gains.number_of_states, 1))
+    self.rkhs_tran, self.rkhs_rot = build_rkhs_feature_maps(self.gains.rkhs_config)
+
+  def computeRKHSRegressorVectorOuterLoop(self):
+    _, R_from_glob_to_loc = Control.computeRotationMatrices(
+      self.odein.roll,
+      self.odein.pitch,
+      self.odein.yaw
+    )
+    v_body = R_from_glob_to_loc * self.odein.translational_velocity_in_I
+    self.Phi_rkhs_tran = self.rkhs_tran.inverse_gramian_phi(v_body)
+    return self.Phi_rkhs_tran
+
+  def computeRKHSRegressorVectorInnerLoop(self):
+    self.Phi_rkhs_rot = self.rkhs_rot.inverse_gramian_phi(self.odein.angular_velocity)
+    return self.Phi_rkhs_rot
 
   def computeControlAlgorithm(self, ode_input: OdeInput):
     """
@@ -42,9 +58,13 @@ class MRAC(BaseMRAC, Control):
     self.integral_e_rot = self.y[97:100] # Integral of 'e_rot' = (angular_velocity - omega_ref) 
     self.integral_angular_error = self.y[100:103] # Integral of angular_error = attitude - attitude_ref
     self.integral_e_omega_ref_cmd = self.y[103:106] #Integral of (omega_ref - omega_cmd)
+    self.Theta_hat_rkhs_tran = self.y[106:130] # RKHS coefficient columns (translational)
+    self.Theta_hat_rkhs_rot = self.y[130:154] # RKHS coefficient columns (rotational)
 
     # Reshapes all adaptive gains to their correct (row, col) shape as matrices
     self.reshapeAdaptiveGainsToMatricesMRAC()
+    self.Theta_hat_rkhs_tran = np.matrix(self.Theta_hat_rkhs_tran.reshape(8, 3))
+    self.Theta_hat_rkhs_rot = np.matrix(self.Theta_hat_rkhs_rot.reshape(8, 3))
 
     # compute translational and rotational trajectory tracking error
     self.computeTrajectoryTrackingErrors(self.odein)
@@ -56,12 +76,15 @@ class MRAC(BaseMRAC, Control):
     self.mu_PD_baseline_tran = self.computeMuPDbaselineOuterLoop()
 
     self.Phi_adaptive_tran_augmented = self.computeRegressorVectorOuterLoop()
+    self.Phi_rkhs_tran = self.computeRKHSRegressorVectorOuterLoop()
 
     self.mu_adaptive_tran = M_MRAC.computeControlLaw(
       self.K_hat_x_tran, self.x_tran,
       self.K_hat_r_tran, self.r_tran,
       self.Theta_hat_tran, self.Phi_adaptive_tran_augmented
     )
+    self.mu_adaptive_rkhs_tran = -self.Theta_hat_rkhs_tran.T * self.Phi_rkhs_tran
+    self.mu_adaptive_tran = self.mu_adaptive_tran + self.mu_adaptive_rkhs_tran
 
     self.mu_tran_raw = self.computeMuRawOuterLoop()
 
@@ -126,6 +149,7 @@ class MRAC(BaseMRAC, Control):
     (self.Phi_adaptive_rot,
      self.Phi_adaptive_rot_augmented
     ) = self.computeRegressorVectorInnerLoop()
+    self.Phi_rkhs_rot = self.computeRKHSRegressorVectorInnerLoop()
 
     # Update Adaptive Laws Inner Loop
     self.updateAdaptiveLawsInnerLoop()
@@ -137,6 +161,8 @@ class MRAC(BaseMRAC, Control):
       self.K_hat_r_rot, self.r_rot,
       self.Theta_hat_rot, self.Phi_adaptive_rot_augmented
     )
+    self.Moment_adaptive_rkhs = -self.Theta_hat_rkhs_rot.T * self.Phi_rkhs_rot
+    self.Moment_adaptive = self.Moment_adaptive + self.Moment_adaptive_rkhs
 
     (self.u2,
      self.u3,
@@ -166,6 +192,8 @@ class MRAC(BaseMRAC, Control):
     self.dy[97:100] = self.odein.angular_velocity - self.omega_ref
     self.dy[100:103] = self.angular_error
     self.dy[103:106] = self.omega_ref - self.omega_cmd
+    self.dy[106:130] = self.Theta_hat_rkhs_tran_dot.reshape(24,1)
+    self.dy[130:154] = self.Theta_hat_rkhs_rot_dot.reshape(24,1)
 
     return np.array(self.dy)
   
@@ -200,6 +228,15 @@ class MRAC(BaseMRAC, Control):
       self.K_hat_x_tran, self.K_hat_r_tran, self.Theta_hat_tran,
       self.gains.use_dead_zone_modification, self.gains.use_e_modification
     )
+    self.Theta_hat_rkhs_tran_dot = self.computeRKHSAdaptiveLaw(
+      self.gains.Gamma_rkhs_tran,
+      self.Phi_rkhs_tran,
+      eTranspose_P_B_tran,
+      self.dead_zone_value_tran,
+      self.gains.sigma_rkhs_tran,
+      eTranspose_P_B_norm_tran,
+      self.Theta_hat_rkhs_tran
+    )
 
     # Projection Operator Outer Loop
     if self.gains.use_projection_operator:
@@ -233,6 +270,16 @@ class MRAC(BaseMRAC, Control):
         self.gains.epsilon_Theta_tran
       )
 
+      (self.Theta_hat_rkhs_tran_dot,
+       self.proj_op_activated_Theta_hat_rkhs_tran
+      ) = ProjectionOperator.Ellipsoid.projectionMatrix(
+        self.Theta_hat_rkhs_tran,
+        self.Theta_hat_rkhs_tran_dot,
+        self.gains.x_e_rkhs_tran,
+        self.gains.S_rkhs_tran,
+        self.gains.epsilon_rkhs_tran
+      )
+
   def updateAdaptiveLawsInnerLoop(self):
     """
     Update the inner loop adaptive laws with deadzone modification, e-modification, and
@@ -263,6 +310,15 @@ class MRAC(BaseMRAC, Control):
       eTranspose_P_B_norm_rot,
       self.K_hat_x_rot, self.K_hat_r_rot, self.Theta_hat_rot,
       self.gains.use_dead_zone_modification, self.gains.use_e_modification
+    )
+    self.Theta_hat_rkhs_rot_dot = self.computeRKHSAdaptiveLaw(
+      self.gains.Gamma_rkhs_rot,
+      self.Phi_rkhs_rot,
+      eTranspose_P_B_rot,
+      self.dead_zone_value_rot,
+      self.gains.sigma_rkhs_rot,
+      eTranspose_P_B_norm_rot,
+      self.Theta_hat_rkhs_rot
     )
 
     # Projection Operator Inner Loop
@@ -297,5 +353,30 @@ class MRAC(BaseMRAC, Control):
         self.gains.epsilon_Theta_rot
       )
 
+      (self.Theta_hat_rkhs_rot_dot,
+       self.proj_op_activated_Theta_hat_rkhs_rot
+      ) = ProjectionOperator.Ellipsoid.projectionMatrix(
+        self.Theta_hat_rkhs_rot,
+        self.Theta_hat_rkhs_rot_dot,
+        self.gains.x_e_rkhs_rot,
+        self.gains.S_rkhs_rot,
+        self.gains.epsilon_rkhs_rot
+      )
+
+  def computeRKHSAdaptiveLaw(self, Gamma_rkhs, Phi_rkhs, eTranspose_P_B, dead_zone_value,
+                             sigma_rkhs, eTranspose_P_B_norm, Theta_hat_rkhs):
+    modulation_factor = dead_zone_value if self.gains.use_dead_zone_modification else 1.0
+    update_term = Phi_rkhs * eTranspose_P_B
+    if self.gains.use_e_modification:
+      update_term = update_term - sigma_rkhs * eTranspose_P_B_norm * Theta_hat_rkhs
+    return Gamma_rkhs * modulation_factor * update_term
+
   def computePostIntegrationAlgorithm(self):
-    pass
+    _, R_from_glob_to_loc = Control.computeRotationMatrices(
+      self.odein.roll,
+      self.odein.pitch,
+      self.odein.yaw
+    )
+    v_body = R_from_glob_to_loc * self.odein.translational_velocity_in_I
+    self.rkhs_tran.update_centers(v_body, time_now=self.odein.time_now, error_signal=self.e_tran)
+    self.rkhs_rot.update_centers(self.odein.angular_velocity, time_now=self.odein.time_now, error_signal=self.e_rot)

@@ -17,8 +17,14 @@ class RKHSWorkspaceLogger:
     "default": 2,
   }
 
+  ACTION_IDS = {
+    "none": 0,
+    "refine": 1,
+    "unrefine": -1,
+  }
+
   MAX_ACTIVE_CENTERS = 8
-  ROW_SIZE = 47
+  ROW_SIZE = 50
 
   def __init__(self) -> None:
     self.data_list = []
@@ -64,9 +70,13 @@ class RKHSWorkspaceLogger:
         "last_added_center": self._columns_to_xyz_dict(data[:, 12:15]),
         "active_center_indices": data[:, 15:23],
         "active_centers": self._active_centers_to_dict(data[:, 23:47]),
+        "desired_depth": data[:, 47].reshape(-1, 1),
+        "window_l2": data[:, 48].reshape(-1, 1),
+        "refinement_action_id": data[:, 49].reshape(-1, 1),
       },
       "domain_ids": self.DOMAIN_IDS,
       "center_mode_ids": self.MODE_IDS,
+      "refinement_action_ids": self.ACTION_IDS,
       "final_center_libraries": self._final_center_libraries_to_dict(),
     }
 
@@ -97,6 +107,10 @@ class RKHSWorkspaceLogger:
     for i, center in enumerate(active_centers[:self.MAX_ACTIVE_CENTERS]):
       start = 23 + 3 * i
       row[start:start + 3] = self._vector3(center)
+
+    row[47] = float(event.get("depth", -1))
+    row[48] = float(event.get("window_l2", 0.0))
+    row[49] = float(self.ACTION_IDS.get(str(event.get("refinement_action", "none")), 0))
 
     return row
 

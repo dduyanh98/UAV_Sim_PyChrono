@@ -13,7 +13,6 @@ def runSingleSimulation(cli_args):
   # # You can modify the default parameters here or in config/config.py
   # mis_cfg.add_payload_flag = False
   # wrp_prms.my_ball_density = 78.5
-
   sim_cfg = Cfg.SimulationConfig(
     mission_config=mis_cfg,
     vehicle_config=veh_cfg,
@@ -23,8 +22,6 @@ def runSingleSimulation(cli_args):
 
   # Update simulation configuration from CLI arguments if provided
   update_cfg_from_cli_args(sim_cfg, cli_args)
-  
   git_info = Logging.getGitRepoInfo()
-
   sim = Simulation(sim_cfg)
   simulateMission(sim, git_info)

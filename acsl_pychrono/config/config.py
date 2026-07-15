@@ -28,6 +28,7 @@ class MissionConfig:
   # Controller types:
   # "PID",
   # "MRAC",
+  # "MRACwithRKHS",
   # "TwoLayerMRAC",
   # "TwoLayerMRACwithRKHS",
   # "FunnelMRAC",
@@ -37,7 +38,7 @@ class MissionConfig:
   # "HybridTwoLayerMRACwithRKHS",
   # "NonAdaptiveEBCI",
   # "FunnelTwoLayerMRAC",
-  controller_type: str = "TwoLayerMRACwithRKHS"
+  controller_type: str = "MRACwithRKHS"
 
   # User-defined trajectory types:
   # "circular_trajectory",
@@ -84,6 +85,27 @@ class MissionConfig:
   # Applying Aero-Dynamic force to the drone
   apply_wind_force: bool = False
   wind_force_vector: tuple[float, float, float] = (0.5, 0.0, 0.0) # [N] in global pychrono coordinate system
+
+  # Rapid payload attach/detach mission for RKHS disturbance rejection tests
+  apply_payload_dither: bool = False
+  payload_dither_n_micro: int = 16
+  payload_dither_micro_radius: float = 0.008
+  payload_dither_micro_density: float = 2000.0
+  payload_dither_f_fast: float = 8.0
+  payload_dither_f_slow: float = 0.3
+  payload_dither_mean0: int = 8
+  payload_dither_amp: int = 2
+  payload_dither_seed: int = 1
+
+  # Rapid motor thrust effectiveness dither for RKHS disturbance rejection tests
+  apply_thrust_dither: bool = False
+  thrust_dither_motor_ids: tuple[int, ...] = (0,)
+  thrust_dither_f_fast: float = 10.0
+  thrust_dither_f_slow: float = 0.2
+  thrust_dither_eps_fast: float = 0.03
+  thrust_dither_eps_slow: float = 0.02
+  thrust_dither_alpha0: float = 1.0
+  thrust_dither_enforce_limits: bool = True
 
   # Unique wrapper batch folder passed to the function used for running many parallel wrapper simulations 
   wrapper_batch_dir: str = "" # LEAVE BLANK!!!

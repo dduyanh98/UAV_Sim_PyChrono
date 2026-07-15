@@ -115,13 +115,14 @@ class HybridMRACwithRKHS(BaseMRAC, Control):
     self.u1,
     self.roll_ref,
     self.pitch_ref
-    ) = Control.computeU1RollPitchRef(
+    ) = Control.computeU1RollPitchRefSIL(
       self.mu_x, 
       self.mu_y, 
       self.mu_z, 
       self.gains.mass_total_estimated,
       self.fp.uav.G_acc,
-      self.odein.yaw_ref
+      self.odein.yaw_ref,
+      self.mu_tran_raw
     )
 
     # Computes roll/pitch reference dot and ddot using state-space differentiators.
@@ -444,5 +445,5 @@ class HybridMRACwithRKHS(BaseMRAC, Control):
       self.odein.yaw
     )
     v_body = R_from_glob_to_loc * self.odein.translational_velocity_in_I
-    self.rkhs_tran.update_centers(v_body)
-    self.rkhs_rot.update_centers(self.odein.angular_velocity)
+    self.rkhs_tran.update_centers(v_body, time_now=self.odein.time_now, error_signal=self.e_tran)
+    self.rkhs_rot.update_centers(self.odein.angular_velocity, time_now=self.odein.time_now, error_signal=self.e_rot)

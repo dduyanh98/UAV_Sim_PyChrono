@@ -99,6 +99,7 @@ controller:
     # PID: "PID_UnTunned.yaml"
     # MRAC: "MRAC.yaml"
     MRAC: "MRAC_185056.yaml"
+    MRACwithRKHS: "MRAC_185056.yaml"
     # MRAC: "MRAC_185309.yaml"
     TwoLayerMRAC: "TwoLayerMRAC.yaml"
     TwoLayerMRACwithRKHS: "TwoLayerMRAC.yaml"

@@ -35,10 +35,14 @@ def get_cli_args():
     choices=[
       "PID", 
       "MRAC",
+      "MRACwithRKHS",
       "TwoLayerMRAC",
+      "TwoLayerMRACwithRKHS",
       "FunnelMRAC",
       "HybridMRAC",
+      "HybridMRACwithRKHS",
       "HybridTwoLayerMRAC",
+      "HybridTwoLayerMRACwithRKHS",
       "NonAdaptiveEBCI"
       ],
     help="Instantiate controller from available type."
@@ -143,6 +147,26 @@ def get_cli_args():
     help="Wind force vector components [N] in global coordinate system (e.g., --wind_force_vector 0.5 0.0 0.0)."
   )
 
+  # Dither disturbance options
+  parser.add_argument("--apply_payload_dither", type=str, help="Enable rapid attach/detach micro-payload disturbance.")
+  parser.add_argument("--payload_dither_n_micro", type=int, help="Number of micro payloads.")
+  parser.add_argument("--payload_dither_micro_radius", type=float, help="Radius of each micro payload sphere.")
+  parser.add_argument("--payload_dither_micro_density", type=float, help="Density of each micro payload sphere.")
+  parser.add_argument("--payload_dither_f_fast", type=float, help="Fast payload dither frequency [Hz].")
+  parser.add_argument("--payload_dither_f_slow", type=float, help="Slow payload dither frequency [Hz].")
+  parser.add_argument("--payload_dither_mean0", type=int, help="Nominal number of attached micro payloads.")
+  parser.add_argument("--payload_dither_amp", type=int, help="Slow attached-count oscillation amplitude.")
+  parser.add_argument("--payload_dither_seed", type=int, help="Payload dither RNG seed.")
+
+  parser.add_argument("--apply_thrust_dither", type=str, help="Enable rapid motor thrust dither disturbance.")
+  parser.add_argument("--thrust_dither_motor_ids", type=int, nargs="+", help="Zero-based motor IDs to dither.")
+  parser.add_argument("--thrust_dither_f_fast", type=float, help="Fast thrust dither frequency [Hz].")
+  parser.add_argument("--thrust_dither_f_slow", type=float, help="Slow thrust dither frequency [Hz].")
+  parser.add_argument("--thrust_dither_eps_fast", type=float, help="Fast thrust dither fractional amplitude.")
+  parser.add_argument("--thrust_dither_eps_slow", type=float, help="Slow thrust dither fractional amplitude.")
+  parser.add_argument("--thrust_dither_alpha0", type=float, help="Nominal thrust dither multiplier.")
+  parser.add_argument("--thrust_dither_enforce_limits", type=str, help="Clamp dithered thrust to motor limits.")
+
   # Environment options
   parser.add_argument(
     "--include_environment",
@@ -234,6 +258,44 @@ def update_cfg_from_cli_args(sim_cfg: Cfg.SimulationConfig, cli_args):
 
   if cli_args.wind_force_vector is not None:
     sim_cfg.mission_config.wind_force_vector = tuple(cli_args.wind_force_vector)
+
+  # Dither disturbances
+  if getattr(cli_args, "apply_payload_dither", None):
+    sim_cfg.mission_config.apply_payload_dither = str2bool(cli_args.apply_payload_dither)
+
+  for arg_name in (
+    "payload_dither_n_micro",
+    "payload_dither_micro_radius",
+    "payload_dither_micro_density",
+    "payload_dither_f_fast",
+    "payload_dither_f_slow",
+    "payload_dither_mean0",
+    "payload_dither_amp",
+    "payload_dither_seed",
+  ):
+    value = getattr(cli_args, arg_name, None)
+    if value is not None:
+      setattr(sim_cfg.mission_config, arg_name, value)
+
+  if getattr(cli_args, "apply_thrust_dither", None):
+    sim_cfg.mission_config.apply_thrust_dither = str2bool(cli_args.apply_thrust_dither)
+
+  if getattr(cli_args, "thrust_dither_motor_ids", None) is not None:
+    sim_cfg.mission_config.thrust_dither_motor_ids = tuple(cli_args.thrust_dither_motor_ids)
+
+  for arg_name in (
+    "thrust_dither_f_fast",
+    "thrust_dither_f_slow",
+    "thrust_dither_eps_fast",
+    "thrust_dither_eps_slow",
+    "thrust_dither_alpha0",
+  ):
+    value = getattr(cli_args, arg_name, None)
+    if value is not None:
+      setattr(sim_cfg.mission_config, arg_name, value)
+
+  if getattr(cli_args, "thrust_dither_enforce_limits", None):
+    sim_cfg.mission_config.thrust_dither_enforce_limits = str2bool(cli_args.thrust_dither_enforce_limits)
     
   # Environment inclusion
   if cli_args.include_environment:

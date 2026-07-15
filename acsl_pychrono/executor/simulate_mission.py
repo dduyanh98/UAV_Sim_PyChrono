@@ -66,6 +66,17 @@ def simulateMission(sim: Simulation, git_info: dict | None = None):
   finally:
     print("\n[INFO] Saving logs before exit...")
     log_dict = logger.toDictionary()
+    disturbances = {}
+    if getattr(sim, "payload_dither", None) is not None:
+      disturbances["payload_dither"] = sim.payload_dither.to_log_dict() if hasattr(sim.payload_dither, "to_log_dict") else {
+        "data": sim.payload_dither.log
+      }
+    if getattr(sim, "thrust_dither", None) is not None:
+      disturbances["thrust_dither"] = sim.thrust_dither.to_log_dict() if hasattr(sim.thrust_dither, "to_log_dict") else {
+        "data": sim.thrust_dither.log
+      }
+    if disturbances:
+      log_dict["disturbances"] = disturbances
     Logging.saveMatlabWorkspaceLog(
       log_dict,
       gains,

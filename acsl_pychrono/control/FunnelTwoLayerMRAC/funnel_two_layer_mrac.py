@@ -106,13 +106,14 @@ class FunnelTwoLayerMRAC(BaseMRAC, Control):
     self.u1,
     self.roll_ref,
     self.pitch_ref
-    ) = Control.computeU1RollPitchRef(
+    ) = Control.computeU1RollPitchRefSIL(
       self.mu_x, 
       self.mu_y, 
       self.mu_z, 
       self.gains.mass_total_estimated,
       self.fp.uav.G_acc,
-      self.odein.yaw_ref
+      self.odein.yaw_ref,
+      self.mu_tran_raw
     )
 
     if self.gains.use_funnel_romoco_old_tran:

@@ -100,6 +100,7 @@ controller:
     PID: "PID_Tunned.yaml"
     # PID: "PID_Tunned2.yaml"
     MRAC: "MRAC.yaml"
+    MRACwithRKHS: "MRAC.yaml"
     TwoLayerMRAC: "TwoLayerMRAC.yaml"
     TwoLayerMRACwithRKHS: "TwoLayerMRAC.yaml"
     FunnelMRAC: "FunnelMRAC.yaml"

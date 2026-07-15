@@ -50,9 +50,13 @@ def rkhs_event_dictionary(tag: str, x_in, rkhs_obj, method="dictionary"):
 
 
 class Box3D:
-  __slots__ = ("xL", "xR", "yL", "yR", "zL", "zR", "center", "corner_idx", "depth", "active")
+  __slots__ = (
+    "xL", "xR", "yL", "yR", "zL", "zR", "center", "corner_idx",
+    "depth", "active", "parent_id", "children_ids"
+  )
 
-  def __init__(self, xL, xR, yL, yR, zL, zR, center, corner_idx, depth=0, active=True):
+  def __init__(self, xL, xR, yL, yR, zL, zR, center, corner_idx,
+               depth=0, active=True, parent_id=None):
     self.xL = float(xL)
     self.xR = float(xR)
     self.yL = float(yL)
@@ -63,6 +67,8 @@ class Box3D:
     self.corner_idx = np.asarray(corner_idx, dtype=int).reshape(8,)
     self.depth = int(depth)    # Initialize box depth
     self.active = bool(active)   # If a box is refined, it becomes inactive and its children become active
+    self.parent_id = None if parent_id is None else int(parent_id)
+    self.children_ids = []
 
   # Check whether a point x is contained within the box
   def contains(self, x):
@@ -76,11 +82,33 @@ class Box3D:
 
 
 class OctreeLibrary3D:
-  def __init__(self, x_grid, y_grid, z_grid, max_depth=3, rho=(1.0, 1.0, 1.0), refine_after_stay=2):
+  def __init__(
+      self,
+      x_grid,
+      y_grid,
+      z_grid,
+      max_depth=3,
+      rho=(1.0, 1.0, 1.0),
+      refine_after_stay=2,
+      l2_window_seconds=1.0,
+      l2_high=np.inf,
+      l2_low=-np.inf,
+      initial_depth=0,
+    ):
     self.max_depth = int(max_depth)
     # rho is used to weight distance within a box
     self.rho = np.asarray(rho, dtype=float).reshape(3,)
     self.refine_after_stay = int(refine_after_stay)
+    self.l2_window_seconds = float(l2_window_seconds)
+    self.l2_high = float(l2_high)
+    self.l2_low = float(l2_low)
+    self.desired_depth = int(np.clip(initial_depth, 0, self.max_depth))
+    self.last_window_l2 = 0.0
+    self.last_refinement_action = "none"
+
+    self._window_start_time = None
+    self._last_error_time = None
+    self._l2_accumulator = 0.0
 
     self.Xi_lib = []
     self._vertex_map = {}
@@ -177,7 +205,9 @@ class OctreeLibrary3D:
   # Refinement
   def _refine_box(self, box_id):
     box = self.Boxes[box_id]
-    if (not box.active) or box.depth >= self.max_depth:
+    if box.depth >= self.max_depth:
+      return
+    if box.children_ids:
       return
 
     xm = (box.xL + box.xR) / 2
@@ -198,15 +228,85 @@ class OctreeLibrary3D:
     for xL, xR, yL, yR, zL, zR in ranges:
       center = np.array([(xL + xR) / 2, (yL + yR) / 2, (zL + zR) / 2], dtype=float)
       corner_idx = self._corners_from_bounds(xL, xR, yL, yR, zL, zR)
-      self.Boxes.append(Box3D(xL, xR, yL, yR, zL, zR, center, corner_idx, depth=box.depth + 1))
+      child_id = len(self.Boxes)
+      self.Boxes.append(Box3D(
+        xL, xR, yL, yR, zL, zR, center, corner_idx,
+        depth=box.depth + 1, parent_id=box_id
+      ))
+      box.children_ids.append(child_id)
+
+  def _descend_to_depth(self, box_id, x, depth):
+    x = np.asarray(x, dtype=float).reshape(3,)
+    target_depth = int(np.clip(depth, 0, self.max_depth))
+
+    while self.Boxes[box_id].depth < target_depth:
+      self._refine_box(box_id)
+      children = self.Boxes[box_id].children_ids
+      if not children:
+        break
+
+      containing = [
+        child_id for child_id in children
+        if self.Boxes[child_id].contains(x)
+      ]
+      if containing:
+        box_id = containing[0]
+      else:
+        box_id = min(
+          children,
+          key=lambda child_id: float(
+            (self.rho * (x - self.Boxes[child_id].center))
+            @ (self.rho * (x - self.Boxes[child_id].center))
+          )
+        )
+    return box_id
+
+  def _ancestor_at_depth(self, box_id, depth):
+    target_depth = int(np.clip(depth, 0, self.max_depth))
+    while self.Boxes[box_id].depth > target_depth and self.Boxes[box_id].parent_id is not None:
+      box_id = self.Boxes[box_id].parent_id
+    return box_id
+
+  def _update_l2_window(self, time_now, error_signal):
+    self.last_refinement_action = "none"
+    if time_now is None or error_signal is None or self.l2_window_seconds <= 0.0:
+      return
+
+    time_now = float(time_now)
+    error_signal = np.asarray(error_signal, dtype=float).reshape(-1,)
+
+    if self._window_start_time is None:
+      self._window_start_time = time_now
+      self._last_error_time = time_now
+      self._l2_accumulator = 0.0
+      return
+
+    dt = max(0.0, time_now - self._last_error_time)
+    self._last_error_time = time_now
+    self._l2_accumulator += float(error_signal @ error_signal) * dt
+
+    if (time_now - self._window_start_time) < self.l2_window_seconds:
+      return
+
+    self.last_window_l2 = float(np.sqrt(max(self._l2_accumulator, 0.0)))
+    if self.last_window_l2 > self.l2_high and self.desired_depth < self.max_depth:
+      self.desired_depth += 1
+      self.last_refinement_action = "refine"
+    elif self.last_window_l2 < self.l2_low and self.desired_depth > 0:
+      self.desired_depth -= 1
+      self.last_refinement_action = "unrefine"
+
+    self._window_start_time = time_now
+    self._l2_accumulator = 0.0
 
   # Main update function: given x, update library state and return box_id and corner_idx
-  def step(self, x):
+  def step(self, x, time_now=None, error_signal=None):
     x = as_col3(x)
     self.event_box_changed = False
     self.event_library_grew = False
     self.last_added_center = None
     self.last_x = x.copy()
+    self._update_l2_window(time_now, error_signal)
 
     box_id = self._find_containing_leaf(x)
     if box_id is None:
@@ -214,7 +314,9 @@ class OctreeLibrary3D:
     if box_id is None:
       raise RuntimeError("Octree dictionary has no active boxes.")
 
-    # Count number of stay
+    box_id = self._ancestor_at_depth(box_id, self.desired_depth)
+    box_id = self._descend_to_depth(box_id, x, self.desired_depth)
+
     if box_id == self._last_box_id:
       self._stay_count += 1
     else:
@@ -222,15 +324,9 @@ class OctreeLibrary3D:
       self._last_box_id = box_id
       self._stay_count = 1
 
-    # Refine if stayed in the same box for too long
-    if self._stay_count >= self.refine_after_stay:
-      self._refine_box(box_id)
-      refined_box_id = self._find_containing_leaf(x)
-      if refined_box_id is not None:
-        box_id = refined_box_id
-        self._last_box_id = box_id
-        self._stay_count = 1
-      
+    if self.last_refinement_action != "none":
+      self.event_box_changed = True
+
     # Store id
     self.last_box_id = int(box_id)
     self.last_corner_idx = self.Boxes[box_id].corner_idx.copy()

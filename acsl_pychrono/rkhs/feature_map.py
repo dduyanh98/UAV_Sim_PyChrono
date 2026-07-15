@@ -32,8 +32,15 @@ class RKHSRegressorConfig:
   default_last_k_tran: int | None = None  # Max number of centers for last-k strategy in default mode (translational)
   default_last_k_rot: int | None = None # Max number of centers for last-k strategy in default mode (rotational)
   gramian_regularization: float = 1e-6
-  max_depth: int = 3   # Max depth of the octree 
-  refine_after_stay: int = 2  # Number of steps to stay in the same box before refining it in octree mode
+  max_depth: int = 4   # Max depth of the octree 
+  refine_after_stay: int = 2  # Deprecated: L2-window refinement is used in octree mode
+  rkhs_l2_window_seconds: float = 1.0
+  rkhs_l2_high_tran: float = 0.60
+  rkhs_l2_low_tran: float = 0.15
+  rkhs_l2_high_rot: float = 0.60
+  rkhs_l2_low_rot: float = 0.15
+  rkhs_initial_depth_tran: int = 0
+  rkhs_initial_depth_rot: int = 0
   rho_tran: tuple = (1.0, 1.0, 1.0)
   rho_rot: tuple = (1.0, 1.0, 1.0)
   # Making sure end points are included
@@ -77,7 +84,7 @@ class RKHSFeatureMap:
     self.last_added_center = None
 
   # Update active centers based on x and the library state
-  def update_centers(self, x):
+  def update_centers(self, x, time_now=None, error_signal=None):
     x = as_col3(x)
     # Copy input x
     self.last_x = x.copy()
@@ -94,7 +101,7 @@ class RKHSFeatureMap:
       return
 
     # Update octree library and get new box_id and corner_idx
-    box_id, corner_idx = self.lib.step(x)
+    box_id, corner_idx = self.lib.step(x, time_now=time_now, error_signal=error_signal)
     self.last_box_id = int(box_id)
     self.last_corner_idx = np.asarray(corner_idx, dtype=int).copy()
     self.event_box_changed = bool(getattr(self.lib, "event_box_changed", False))
@@ -155,6 +162,9 @@ class RKHSFeatureMap:
         np.asarray(self.last_added_center).reshape(-1).tolist()
         if self.last_added_center is not None else None
       ),
+      "depth": int(getattr(self.lib, "desired_depth", -1)) if self.center_mode == "octree" else -1,
+      "window_l2": float(getattr(self.lib, "last_window_l2", 0.0)) if self.center_mode == "octree" else 0.0,
+      "refinement_action": getattr(self.lib, "last_refinement_action", "none") if self.center_mode == "octree" else "none",
     }
 
   def clear_events(self):
@@ -190,12 +200,20 @@ def build_rkhs_feature_maps(config=None):
       max_depth=config.max_depth,
       rho=config.rho_tran,
       refine_after_stay=config.refine_after_stay,
+      l2_window_seconds=config.rkhs_l2_window_seconds,
+      l2_high=config.rkhs_l2_high_tran,
+      l2_low=config.rkhs_l2_low_tran,
+      initial_depth=config.rkhs_initial_depth_tran,
     )
     rot_lib = OctreeLibrary3D(
       *rot_grid,
       max_depth=config.max_depth,
       rho=config.rho_rot,
       refine_after_stay=config.refine_after_stay,
+      l2_window_seconds=config.rkhs_l2_window_seconds,
+      l2_high=config.rkhs_l2_high_rot,
+      l2_low=config.rkhs_l2_low_rot,
+      initial_depth=config.rkhs_initial_depth_rot,
     )
     return (
       RKHSFeatureMap(tran_lib, sigma=config.sigma_tran, center_mode="octree", gramian_regularization=config.gramian_regularization),

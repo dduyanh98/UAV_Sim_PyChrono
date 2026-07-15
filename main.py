@@ -33,6 +33,8 @@ def run_experiment(**kwargs):
 
 def main(cli_args):
   """Main entry point for both CLI and module use."""
+  print("ENTERED MAIN")
+  print("CLI ARGS:", cli_args)
   Executor.launchSimulation(cli_args)
 
 # Execution if the sript is directly called

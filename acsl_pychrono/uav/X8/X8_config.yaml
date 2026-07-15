@@ -99,6 +99,7 @@ controller:
     # PID: "PID.yaml"
     PID: "PID1.yaml"
     MRAC: "MRAC.yaml"
+    MRACwithRKHS: "MRAC.yaml"
     TwoLayerMRAC: "TwoLayerMRAC.yaml"
     TwoLayerMRACwithRKHS: "TwoLayerMRAC.yaml"
     FunnelMRAC: "FunnelMRAC.yaml"

@@ -18,6 +18,7 @@ from acsl_pychrono.simulation.utils import Utils
 from acsl_pychrono.control.control import Control
 import acsl_pychrono.uav as UAV_Module
 from acsl_pychrono.simulation.ANCF_cable_rope import ANCFCableRope
+from acsl_pychrono.simulation.disturbances import PayloadDither, ThrustDither
 
 class Simulation:
   def __init__(self, sim_cfg: Cfg.SimulationConfig = Cfg.SimulationConfig()) -> None:
@@ -33,6 +34,8 @@ class Simulation:
     self.m_props: list[chrono.ChBody] = []
     self.m_markers = []
     self.m_motors = []
+    self.payload_dither: PayloadDither | None = None
+    self.thrust_dither: ThrustDither | None = None
 
     # Vehicle state
     self.vehicle_state: VehicleState = VehicleState()
@@ -507,6 +510,41 @@ class Simulation:
     self.addSpheresInArrays()
     self.addRandomSpheres()
     self.addSlingBallPayload()
+    self.addPayloadDither()
+
+  def addPayloadDither(self):
+    if not self.mission_config.apply_payload_dither:
+      return
+
+    contact_material = chrono.ChContactMaterialNSC()
+    self.payload_dither = PayloadDither(
+      self.m_sys,
+      self.m_frame,
+      contact_material,
+      n_micro=self.mission_config.payload_dither_n_micro,
+      micro_radius=self.mission_config.payload_dither_micro_radius,
+      micro_density=self.mission_config.payload_dither_micro_density,
+      f_fast=self.mission_config.payload_dither_f_fast,
+      f_slow=self.mission_config.payload_dither_f_slow,
+      mean0=self.mission_config.payload_dither_mean0,
+      amp=self.mission_config.payload_dither_amp,
+      seed=self.mission_config.payload_dither_seed
+    )
+    self.payload_dither.initialize()
+
+  def setUpThrustDither(self):
+    if not self.mission_config.apply_thrust_dither:
+      return
+
+    self.thrust_dither = ThrustDither(
+      motor_ids=self.mission_config.thrust_dither_motor_ids,
+      f_fast=self.mission_config.thrust_dither_f_fast,
+      f_slow=self.mission_config.thrust_dither_f_slow,
+      eps_fast=self.mission_config.thrust_dither_eps_fast,
+      eps_slow=self.mission_config.thrust_dither_eps_slow,
+      alpha0=self.mission_config.thrust_dither_alpha0,
+      enforce_Tmin_Tmax=self.mission_config.thrust_dither_enforce_limits
+    )
 
   def updatePixhawkState(self):
     coord_GLOB = self.marker_pixhawk.GetAbsCoordsys()
@@ -631,6 +669,17 @@ class Simulation:
 
     # Accounting for motor efficiency
     controller.motor_thrusts = np.array(flight_params.uav.motor_efficiency_matrix * controller.motor_thrusts)
+
+  def applyThrustDither(self, controller, flight_params: FlightParams, time_now: float):
+    if self.thrust_dither is None:
+      return
+
+    controller.motor_thrusts = self.thrust_dither.apply(
+      controller.motor_thrusts,
+      time_now,
+      flight_params.uav.minimum_motor_thrust,
+      flight_params.uav.maximum_motor_thrust
+    )
   
   def applyMotorForces(self, controller, flight_params: FlightParams):
     """
@@ -792,6 +841,7 @@ class Simulation:
     self.gains = gains
     self.controller = controller
     self.logger = logger
+    self.setUpThrustDither()
 
   def runSimulationLoop(self):
     self.visualization.setup()
@@ -851,6 +901,8 @@ class Simulation:
 
     # Thrust saturation
     self.applyMotorThrustLimitsAndEfficiency(self.controller, self.flight_params)
+    # Apply rapid motor effectiveness dither after nominal efficiency/failure effects
+    self.applyThrustDither(self.controller, self.flight_params, time_now)
     # Applying motor thrust forces
     self.applyMotorForces(self.controller, self.flight_params)
     # Apply propellers reaction torques around local yaw-axis
@@ -869,6 +921,8 @@ class Simulation:
                                apply=mission_config.sequentially_drop_multiple_balls,
                                drop_start_time=mission_config.sequentially_drop_start_time,
                                drop_interval=mission_config.sequentially_drop_interval)
+    if self.payload_dither is not None:
+      self.payload_dither.update(time_now)
 
   def handleFaults(self, time_now: float, mission_config: Cfg.MissionConfig):
     # Motor failure
